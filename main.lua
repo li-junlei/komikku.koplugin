@@ -36,7 +36,7 @@ function Plugin:init()
     if not registry.known_providers.komikku then require("km_document"):register(registry) end
     if self.ui and self.ui.menu then self.ui.menu:registerToMainMenu(self) end
     if self.document and self.document.is_komikku then
-        require("km_navigation").install(self.ui, self.document)
+        require("km_navigation").install(self.ui, self.document, self)
         local m = self.document.km_manifest
         self.manga, self.chapter = App:find(m.manga_key, m.chapter_key)
     end
@@ -48,19 +48,15 @@ function Plugin:addToMainMenu(items)
         sub_item_table = {
             { text = "打开书架", callback = function() self:openShelf() end },
             { text = "浏览 Komga 书库", callback = function() require("km_library").open(self, worker) end },
-            { text = "同步书架与阅读进度", callback = function() self:sync() end },
-            { text = "继续阅读", callback = function() self:resume() end },
-            { text = "离线下载", callback = function() self:offline() end },
+            { text_func = function() return self:resumeText() end, callback = function() self:resume() end },
+            { text = "缓存管理", callback = function() require("km_storage").show(self) end },
             { text = "设置", callback = function() self:settings() end },
+            { text = "更新", callback = function() self:updateMenu() end },
             { text = "同步状态", callback = function() self:status() end },
-            { text = "重试当前章节", enabled_func = function() return self.chapter ~= nil end,
-                callback = function() if self.chapter then self:openChapter(self.manga, self.chapter) end end },
-            { text = "下一章", enabled_func = function() return self.chapter ~= nil end,
-                callback = function() self:nextChapter() end },
         },
     }
     if self.document and self.document.is_komikku then
-        table.insert(items.komikku.sub_item_table, 8, {
+        table.insert(items.komikku.sub_item_table, {
             text = "漫画去灰", checked_func = function() return App.config.comic_degray == true end,
             callback = function()
                 App.config.comic_degray = not App.config.comic_degray
@@ -118,15 +114,14 @@ end
 
 function Plugin:shelf(category, page, cached_only)
     local shelf = App:reloadShelf()
-    if not shelf then message("书架为空。请在手机启用书架、分类和章节同步，然后在这里同步。离线时可从“离线下载”进入。") return end
+    if not shelf then message("书架为空。请在手机启用书架、分类和章节同步，然后在设置的同步菜单中同步。离线时可从“缓存管理”进入。") return end
     local items, mangas = {}, {}
     items[#items + 1] = { text = "缩略图模式（每页 6 本）", callback = function()
         App.config.shelf_view = "covers"; App:saveConfig(); self:shelf(category)
     end }
     if category == nil then
-        items[#items + 1] = { text = "继续阅读", callback = function() self:resume() end }
+        items[#items + 1] = { text = self:resumeText(), callback = function() self:resume() end }
         items[#items + 1] = { text = "按分类浏览", callback = function() self:categories() end }
-        items[#items + 1] = { text = "同步书架与进度", callback = function() self:sync(function() self:shelf() end) end }
     end
     for _, m in ipairs(shelf.mangas) do
         local visible = category == nil
@@ -184,7 +179,6 @@ function Plugin:coverShelf(mangas, category, page, cached_only, context)
             if context then context.on_list() else App.config.shelf_view = "list"; App:saveConfig(); self:shelf(category) end
         end,
         on_categories = function() close(); self:categories() end,
-        on_sync = function() close(); self:sync(function() self:shelf(category, current) end) end,
         on_resume = function() close(); self:resume() end,
         on_select = function(m) close(); if context then context.on_select(m) else self:chapters(m) end end,
         on_closed = function()
@@ -277,6 +271,7 @@ function Plugin:openChapter(m, c)
             settings:saveSetting("last_page", result.page)
             settings:saveSetting("provider", "komikku")
             settings:flush()
+            App.cache:markRead(result.dir)
             App.cache:evict(result.dir)
             self:closeMenus()
             require("apps/reader/readerui"):showReader(path, require("km_document"))
@@ -366,27 +361,6 @@ function Plugin:deleteChapter(c)
     UIManager:show(confirm)
 end
 
-function Plugin:offline()
-    local items = {}
-    for _, m in ipairs(App:allMangas()) do
-        for _, c in ipairs(m.chapters) do
-            local dir = App.cache:directory(c.url)
-            local bytes = F.read(dir .. "/chapter.kmk")
-            if bytes then
-                local manifest = require("json").decode(bytes)
-                if F.read(dir .. "/offline") then
-                    local complete = App.cache:isOffline(dir, #manifest.pages)
-                    items[#items + 1] = { text = m.title .. " · " .. c.name,
-                        mandatory = complete and "已下载" or "未完成",
-                        callback = function() self:chapterActions(m, c) end }
-                end
-            end
-        end
-    end
-    if #items == 0 then message("还没有离线下载。可在章节菜单中下载整章。") return end
-    self:menu("离线下载", items)
-end
-
 function Plugin:resume()
     local last = App.state.last
     if last then
@@ -396,30 +370,72 @@ function Plugin:resume()
     message("暂无可继续阅读的记录，请从书架选择漫画。")
 end
 
-function Plugin:nextChapter()
+function Plugin:resumeText()
+    local last = App.state.last
+    local manga = last and App:find(last.manga)
+    return manga and ("继续阅读 — " .. manga.title) or "继续阅读"
+end
+
+function Plugin:nextChapter(direction)
     if not self.chapter then return end
     local list = self:orderedChapters(self.manga)
     for i, c in ipairs(list) do
         if c.key == self.chapter.key then
-            if list[i + 1] then self:openChapter(self.manga, list[i + 1]) else message("已经是最后一章。") end
+            local target = list[i + (direction or 1)]
+            if target then self:openChapter(self.manga, target)
+            else message(direction == -1 and "已经是第一章。" or "已经是最后一章。") end
             return
         end
     end
+end
+
+function Plugin:readerContents()
+    if not self.chapter then return end
+    local list, index = self:orderedChapters(self.manga)
+    for i, c in ipairs(list) do if c.key == self.chapter.key then index = i; break end end
+    local function run(fn) return function() self:closeMenus(); fn() end end
+    local items = {
+        { text = "上一章", select_enabled = index and index > 1 or false,
+            callback = run(function() self:nextChapter(-1) end) },
+        { text = "重试当前章节", callback = run(function() self:openChapter(self.manga, self.chapter) end) },
+        { text = "下一章", select_enabled = index and index < #list or false,
+            callback = run(function() self:nextChapter(1) end) },
+    }
+    local current = self.ui:getCurrentPage()
+    for page = 1, self.document:getPageCount() do
+        items[#items + 1] = { text = "第 " .. page .. " 页", mandatory = page == current and "当前页" or nil,
+            callback = run(function() self.ui:handleEvent(require("ui/event"):new("GotoPage", page)) end) }
+    end
+    self:menu("漫画目录 · " .. self.chapter.name, items)
+end
+
+function Plugin:updateMenu()
+    local version = assert(loadfile(self.path .. "/_meta.lua"))().version
+    self:menu("插件更新", {
+        { text = "当前版本：" .. version, select_enabled = false },
+        { text = "检查更新", callback = function() require("km_update").show(self, worker) end },
+    })
+end
+
+function Plugin:syncSettings()
+    self:menu("同步", {
+        { text = "WebDAV 同步设置", callback = function() self:connectionSettings("webdav") end },
+        { text = "自动同步：" .. (App.config.auto_sync == false and "关" or "开"), callback = function()
+            App.config.auto_sync = App.config.auto_sync == false
+            App:saveConfig(); self:syncSettings()
+        end },
+        { text = "立即同步", callback = function() self:sync() end },
+    })
 end
 
 function Plugin:settings()
     self:menu("Komikku 设置", {
         { text = "Komga 连接", callback = function() self:connectionSettings("komga") end },
         { text = "Komga 同步来源", callback = function() require("km_library").sourceSettings(self) end },
-        { text = "检查插件更新（GitHub）", callback = function() require("km_update").show(self, worker) end },
-        { text = "WebDAV 同步", callback = function() self:connectionSettings("webdav") end },
-        { text = "自动同步：" .. (App.config.auto_sync == false and "关" or "开"), callback = function()
-            App.config.auto_sync = App.config.auto_sync == false
-            App:saveConfig(); self:settings()
-        end },
+        { text = "同步", callback = function() self:syncSettings() end },
         { text = "自定义 CA 证书路径（可选）", callback = function() self:caSetting() end },
         { text = "说明", callback = function()
-            message("Komga 与 WebDAV 地址均使用 HTTPS。同步目录与手机保持一致；留空表示 WebDAV 地址的根目录。\n\n默认在线阅读，预取后续 2 页；未固定缓存约 128 MiB，当前章节受保护。离线下载需手动删除。\n\n账号信息保存在设备本地设置文件，请保管设备及备份。")
+            message("Komga 与 WebDAV 地址均使用 HTTPS。同步目录与手机保持一致；留空表示 WebDAV 地址的根目录。\n\n默认在线阅读，预取后续 2 页；缓存管理中可设置在线缓存上限，默认 128 MiB，0 表示关闭自动清理。最早阅读的章节优先清理，当前章节和手动离线下载受保护。\n\n账号信息保存在设备本地设置文件，请保管设备及备份。")
         end },
     })
 end
@@ -503,6 +519,7 @@ function Plugin:status()
 end
 
 function Plugin:onReaderReady()
+    if self.document and self.document.is_komikku then App.cache.active_dir = self.document.km_dir end
     if self.document and self.document.is_komikku then UIManager:setDirty(self.ui.dialog, "full") end
     if not self.chapter then return end
     local doc = self.document
@@ -534,6 +551,12 @@ end
 function Plugin:onCloseDocument()
     if not self.chapter then return end
     self:onSuspend()
+    App.cache.active_dir = nil
+    self.chapter, self.manga = nil, nil
+    UIManager:nextTick(function()
+        local ok, err = pcall(App.cache.evict, App.cache)
+        if not ok then message(errorText(err)) end
+    end)
     if App.config.auto_sync ~= false and App.config.webdav_url and NetworkMgr:isConnected() then
         UIManager:nextTick(function() self:sync(function() end) end)
     end

@@ -41,7 +41,10 @@ end
 function C:ensure(m, dir, page)
     assert(m.pages[page], "页面索引越界")
     local path = self:pagePath(dir, page)
-    if not self:hasPage(dir, page) then K.downloadPage(self.config, m.address, m.pages[page], path) end
+    if not self:hasPage(dir, page) then
+        K.downloadPage(self.config, m.address, m.pages[page], path)
+        if not F.read(dir .. "/offline") then self:evict(dir) end
+    end
     lfs.touch(path)
     return path
 end
@@ -128,42 +131,72 @@ function C:prefetch(m, dir, current)
         if ffiutil.isSubProcessDone(pid) then
             self.pid, self.poll = nil, nil
             ui:allowStandby()
+            self:evict(dir)
         else ui:scheduleIn(0.5, self.poll) end
     end
     ui:scheduleIn(0.5, self.poll)
 end
 
-function C:evict(protected)
-    local files, size = {}, 0
+function C:entries(metadata)
+    local entries = {}
     for name in lfs.dir(self.root) do
         local dir = self.root .. "/" .. name
-        if name:match("^%x+$") and lfs.attributes(dir, "mode") == "directory" and not F.read(dir .. "/offline") then
+        if name:match("^%x+$") and lfs.attributes(dir, "mode") == "directory" then
+            local entry = { dir = dir, bytes = 0, done = 0, time = 0, offline = F.read(dir .. "/offline") ~= nil }
+            local bytes = metadata ~= false and F.read(dir .. "/chapter.kmk")
+            if bytes then
+                local ok, manifest = pcall(require("json").decode, bytes)
+                if ok and type(manifest) == "table" then entry.manifest = manifest end
+            end
             for file in lfs.dir(dir) do
-                if file:match("^%d+%.png$") then
-                    local path = dir .. "/" .. file
-                    local a = lfs.attributes(path)
-                    size = size + a.size
-                    if dir ~= protected then files[#files + 1] = { path = path, size = a.size, time = a.modification } end
+                local a = lfs.attributes(dir .. "/" .. file)
+                if a and a.mode == "file" then
+                    entry.bytes = entry.bytes + a.size
+                    if file:match("^%d+%.png$") and a.size > 0 then
+                        entry.done = entry.done + 1
+                        entry.time = math.max(entry.time, a.modification or 0)
+                    end
                 end
             end
+            entry.time = tonumber(F.read(dir .. "/read-order")) or entry.time
+            entries[#entries + 1] = entry
         end
     end
-    table.sort(files, function(a, b) return a.time < b.time end)
-    for _, f in ipairs(files) do
-        if size <= 128 * 1024 * 1024 then break end
-        if os.remove(f.path) then size = size - f.size end
+    table.sort(entries, function(a, b) if a.time == b.time then return a.dir < b.dir end; return a.time < b.time end)
+    return entries
+end
+
+function C:markRead(dir)
+    F.write(dir .. "/read-order", string.format("%.6f", require("socket").gettime()))
+end
+
+function C:evict(protected)
+    local limit = tonumber(self.config.online_cache_limit_mb) or 128
+    if limit <= 0 then return end
+    local entries, size = self:entries(false), 0
+    for _, e in ipairs(entries) do if not e.offline then size = size + e.bytes end end
+    for _, e in ipairs(entries) do
+        if size <= limit * 1024 * 1024 then break end
+        if not e.offline and e.dir ~= protected and e.dir ~= self.active_dir then
+            self:removeDir(e.dir); size = size - e.bytes
+        end
     end
 end
 
 function C:remove(address)
+    return self:removeDir(self:directory(address))
+end
+
+function C:removeDir(dir)
+    assert(dir:sub(1, #self.root + 1) == self.root .. "/" and dir:sub(#self.root + 2):match("^%x+$"), "无效缓存目录")
     self:stopPrefetch()
-    local dir = self:directory(address)
     if lfs.attributes(dir, "mode") ~= "directory" then return end
     for name in lfs.dir(dir) do
-        if name:match("^%d+%.png") or name == "offline" or name == "chapter.kmk" then
+        if name:match("^%d+%.png") or name == "offline" or name == "chapter.kmk" or name == "read-order" then
             assert(os.remove(dir .. "/" .. name), "删除下载失败")
         end
     end
+    os.remove(dir)
 end
 
 return C

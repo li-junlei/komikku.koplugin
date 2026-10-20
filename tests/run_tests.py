@@ -447,8 +447,8 @@ class Checks(unittest.TestCase):
             local menus={}
             function plugin:menu(title,items) menus[#menus+1]={title=title,items=items} end
             plugin:shelf()
-            assert(#menus[1].items==5)
-            menus[1].items[5].callback()
+            assert(#menus[1].items==4)
+            menus[1].items[4].callback()
             assert(#menus[2].items==2)
             menus[2].items[2].callback()
             assert(#menus[3].items==3)
@@ -456,9 +456,9 @@ class Checks(unittest.TestCase):
             menus[3].items[1].callback()
             assert(events.open==test_shelf.mangas[1].chapters[1].url)
             plugin:settings()
-            assert(#menus[4].items==7)
+            assert(#menus[4].items==5)
             local mainitems={};plugin:addToMainMenu(mainitems)
-            assert(mainitems.komikku and #mainitems.komikku.sub_item_table==9)
+            assert(mainitems.komikku and #mainitems.komikku.sub_item_table==7)
             local App=package.loaded.km_app
             function App:record(m,c,page,total,dir) events.saved=page end
             local doc={is_open=true,is_komikku=true,km_manifest={},km_dir='/cache',getPageCount=function() return 20 end}
@@ -492,6 +492,33 @@ class Checks(unittest.TestCase):
             assert(toggle.text=='漫画去灰' and not toggle.checked_func())
             toggle.callback();assert(toggle.checked_func() and saved==1 and #refreshes==3)
             toggle.callback();assert(not toggle.checked_func() and saved==2 and #refreshes==4)
+            App.state.last={manga='last'}
+            App.find=function(_,key) assert(key=='last');return test_shelf.mangas[1] end
+            assert(plugin:resumeText()=='继续阅读 — '..test_shelf.mangas[1].title)
+            plugin:syncSettings()
+            local syncmenu=menus[#menus].items
+            assert(#syncmenu==3 and syncmenu[1].text=='WebDAV 同步设置' and syncmenu[3].text=='立即同步')
+            syncmenu[2].callback();assert(App.config.auto_sync and saved==3)
+            plugin.manga={title='Comic',chapters={
+                {key='a',name='A',order=2,url='a'},{key='b',name='B',order=1,url='b'}}}
+            plugin.chapter=plugin.manga.chapters[1]
+            plugin.closeMenus=function() end
+            plugin:readerContents()
+            local toc=menus[#menus].items
+            assert(#toc==23 and not toc[1].select_enabled and toc[3].select_enabled)
+            assert(toc[8].mandatory=='当前页' and toc[4].text=='第 1 页')
+            package.loaded['ui/event']={new=function(_,name,page) return {name=name,page=page} end}
+            local jumped
+            plugin.ui.handleEvent=function(_,event) assert(event.name=='GotoPage');jumped=event.page end
+            toc[13].callback();assert(jumped==10)
+            toc[3].callback();assert(events.open=='b')
+            plugin.chapter=plugin.manga.chapters[2]
+            plugin:readerContents();toc=menus[#menus].items
+            assert(toc[1].select_enabled and not toc[3].select_enabled)
+            toc[1].callback();assert(events.open=='a')
+            toc[2].callback();assert(events.open=='b')
+            plugin:onCloseDocument()
+            assert(plugin.chapter==nil and plugin.manga==nil)
         '''.encode())
 
     def test_thumbnail_grid_pagination_layout_callbacks_and_cleanup(self):
@@ -687,7 +714,7 @@ class Checks(unittest.TestCase):
             assert(#downloads==7 and grid.entries[1].file==nil and #grid.entries==6)
             function P:menu(title,items) self.list_items=items end
             grid.on_list()
-            assert(App.saved and App.config.shelf_view=='list' and #P.list_items==17)
+            assert(App.saved and App.config.shelf_view=='list' and #P.list_items==16)
             assert(#App.menus==0)
         '''.encode())
 
@@ -780,9 +807,29 @@ class Checks(unittest.TestCase):
             assert(before==ffi.string(data,516))
         ''')
 
+    def test_reader_toc_actions_and_return_closes_document(self):
+        self.lua.execute(b'''
+            local N=require('km_navigation')
+            local events={}
+            G_reader_settings={readSetting=function() return 'history' end}
+            local doc={is_komikku=true,is_open=true,file='/cache/chapter.kmk'}
+            local owner={readerContents=function() events[#events+1]='contents' end}
+            local ui={document=doc,toc={onShowToc=function() events[#events+1]='native-toc' end},
+                onClose=function(self) events[#events+1]='close';self.document.is_open=false;self.document=nil end,
+                showFileManager=function() events[#events+1]='browser' end}
+            N.install(ui,doc,owner)
+            ui.toc:onShowToc()
+            assert(events[1]=='contents')
+            ui:showFileManager(doc.file)
+            assert(table.concat(events,',')=='contents,close,browser')
+            ui.toc:onShowToc();assert(events[4]=='native-toc')
+        ''')
+
 if __name__ == '__main__':
     from test_library import install
     install(Checks, backup, chapter, field)
     from test_update import install as install_update
     install_update(Checks)
+    from test_storage import install as install_storage
+    install_storage(Checks)
     unittest.main(verbosity=2)

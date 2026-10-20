@@ -138,7 +138,8 @@ def install(Checks):
                     if mode=='failure' then error('download failed') end
                     size=100;scheduled();assert(d.percent==1);return true
                 end
-                U.download({path='/plugins/komikku.koplugin'},worker,{size=100,version='0.3.1'})
+                U.download({path='/plugins/komikku.koplugin',chapter={key='stale'},
+                    document={is_komikku=true,is_open=false}},worker,{size=100,version='0.3.1'})
                 assert(not App.updating and not scheduled)
                 assert(installed==(mode=='success'))
                 assert(#messages==(mode=='cancel' and 0 or 1))

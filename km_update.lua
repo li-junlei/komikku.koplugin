@@ -133,7 +133,9 @@ function U.download(owner, worker, release)
     local UI = require("ui/uimanager")
     local function message(text) UI:show(require("ui/widget/infomessage"):new{ text = text }) end
     if App.updating then return end
-    if owner.chapter or App.syncing then message("请先关闭漫画，并等待书架同步完成后再更新。") return end
+    if (owner.document and owner.document.is_komikku and owner.document.is_open) or App.syncing then
+        message("请先返回文件管理器，并等待书架同步完成后再更新。") return
+    end
     local zip = App.root .. "/update.zip"
     local stage = U.paths(owner.path)
     App.updating = true

@@ -67,7 +67,6 @@ function Grid:init()
     local header = ButtonTable:new{ width = width, buttons = { self.header_buttons or {
         { text = "列表", callback = self.on_list },
         { text = "分类", callback = self.on_categories },
-        { text = "同步", callback = self.on_sync },
         { text = "继续阅读", callback = self.on_resume },
         { text = "关闭", callback = function() self:onClose() end },
     } } }
