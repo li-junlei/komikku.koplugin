@@ -33,7 +33,7 @@ function U.get(config, address, destination)
 end
 
 function U.check(config, current)
-    local bytes = U.get(config, "https://api.github.com/repos/" .. U.repository .. "/releases/latest")
+    local bytes = U.get(config, "https://github.com/" .. U.repository .. "/releases/latest/download/update.json")
     local release = require("json").decode(bytes)
     assert(type(release) == "table" and type(release.tag_name) == "string"
         and not release.draft and not release.prerelease, "GitHub 版本信息无效")
@@ -45,7 +45,7 @@ function U.check(config, current)
             assert(type(asset.size) == "number" and asset.size > 0 and asset.size <= 32 * 1024 * 1024,
                 "更新安装包大小无效")
             assert(type(asset.digest) == "string" and asset.digest:match("^sha256:%x+$") and #asset.digest == 71,
-                "GitHub 尚未提供安装包 SHA256，请稍后重试")
+                "Release 缺少有效的安装包 SHA256")
             local address = "https://github.com/" .. U.repository .. "/releases/download/" .. release.tag_name .. "/" .. name
             assert(asset.browser_download_url == address, "更新安装包地址无效")
             return { available = true, version = version, size = asset.size, url = address,

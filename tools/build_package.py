@@ -2,6 +2,8 @@
 from pathlib import Path
 import re
 import zipfile
+import hashlib
+import json
 
 ROOT = Path(__file__).resolve().parents[1]
 version = re.search(r'version\s*=\s*"([\d.]+)"', (ROOT / '_meta.lua').read_text(encoding='utf8')).group(1)
@@ -24,3 +26,11 @@ with zipfile.ZipFile(target) as archive:
     assert len(archive.namelist()) == len(files)
 print(target)
 print(f'{len(files)} files, {target.stat().st_size:,} bytes; package checks passed')
+manifest = {
+    'tag_name': 'v' + version, 'draft': False, 'prerelease': False,
+    'assets': [{'name': target.name, 'size': target.stat().st_size,
+                'digest': 'sha256:' + hashlib.sha256(target.read_bytes()).hexdigest(),
+                'browser_download_url': f'https://github.com/li-junlei/komikku.koplugin/releases/download/v{version}/{target.name}'}],
+}
+(target.parent / 'update.json').write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + '\n', encoding='utf8')
+print(target.parent / 'update.json')

@@ -16,7 +16,7 @@ def install(Checks):
             package.loaded.km_http={request=function(_,service,method,address,_,headers,destination)
                 assert(service=='github' and method=='GET' and headers.Authorization==nil)
                 calls[#calls+1]=address
-                if address:find('api.github.com',1,true) then return '{}',200,{} end
+                if address:find('/releases/latest/download/update.json',1,true) then return '{}',200,{} end
                 if address:find('github.com/',1,true) then
                     return 0,302,{location='https://release-assets.githubusercontent.com/file?signature=abc'}
                 end

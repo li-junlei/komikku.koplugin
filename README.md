@@ -19,14 +19,14 @@
 
 这是可安装测试版。自动化检查通过不代表真实账号、Kindle 的 TLS 或原生绘制已获验证。
 
-## 0.3.0 更新
+## 0.3.1 更新
 
 - **设置 → 检查插件更新（GitHub）**：检查最新正式 Release，确认后下载，显示下载字节数、百分比与进度条，可取消。
-- 校验 GitHub 提供的 SHA256、压缩包路径、Lua 语法和依赖后再安装；下载失败或取消不替换插件，替换失败会尝试恢复旧版。
+- 校验 Release 附带的 SHA256、压缩包路径、Lua 语法和依赖后再安装；下载失败或取消不替换插件，替换失败会尝试恢复旧版。
 - 保留旧插件目录 `komikku.koplugin.previous`，配置、书架、缓存和阅读进度不属于更新目录。安装完成后提示重启 KOReader。
 - 保留 0.2.1/0.2.2 的书库响应修复和手动同步来源选择。
 
-首次安装本版仍需手动解压 Release 的 `komikku-koplugin-0.3.0.zip` 至 `koreader/plugins/`；之后可在插件设置中更新。不要下载 GitHub 自动生成的 Source code ZIP 作为安装包。无需 GitHub 账号或令牌，更新请求不会发送 Komga / WebDAV 账号。
+首次安装本版仍需手动解压 Release 的 `komikku-koplugin-0.3.1.zip` 至 `koreader/plugins/`；之后可在插件设置中更新。不要下载 GitHub 自动生成的 Source code ZIP 作为安装包。无需 GitHub 账号或令牌，更新请求不会发送 Komga / WebDAV 账号。版本信息直接读取 Release 的 `update.json`，不消耗 GitHub API 匿名请求额度。
 
 请先关闭漫画并等待同步完成，再安装更新。GitHub 访问受限时会报错，可稍后重试或手动下载。安装时不要断电；如果断电恰好发生在目录替换之间，可将 `koreader/plugins/komikku.koplugin.previous` 恢复为 `komikku.koplugin`，或重新解压安装包，设备数据仍保存在原位置。
 
@@ -140,5 +140,7 @@
 python tests/run_tests.py
 python tools/build_package.py
 ```
+
+发布新版本时，将 `_meta.lua` 的版本号改为三段数字，打包后将 ZIP 和 `dist/update.json` 一起上传至对应的 `v版本号` 正式 Release。更新器忽略预发布版；`update.json` 必须与该 Release 的安装包一致。
 
 36 项测试涵盖协议、未知字段保留、独立 Protobuf 解码、版本冲突、上传失败、HTTPS 边界、离线缓存、下载进度和取消清理、历史隔离、漫画专用全屏刷新、六本封面分页、横竖屏布局、当前页封面请求、Bookshelf 返回隔离、书库筛选参数、章节映射、新增收藏幂等、本地阅读后加入、完整来源 ID、更新版本比较、GitHub 跳转限制、SHA256、解压路径、依赖检查、更新回退及更新下载进度等。详见 [协议说明](docs/protocol.md) 和 [实施方案](docs/plan.md)。
