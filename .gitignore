@@ -1,0 +1,5 @@
+.reference/
+.private/
+dist/
+__pycache__/
+*.pyc
