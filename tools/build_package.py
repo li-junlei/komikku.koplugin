@@ -10,6 +10,7 @@ version = re.search(r'version\s*=\s*"([\d.]+)"', (ROOT / '_meta.lua').read_text(
 target = ROOT / 'dist' / f'komikku-koplugin-{version}.zip'
 target.parent.mkdir(exist_ok=True)
 files = sorted(ROOT.glob('*.lua')) + [ROOT / 'README.md'] + sorted((ROOT / 'docs').glob('*.md'))
+assert all(re.fullmatch(r'[\w_]+\.lua|README\.md|docs/[\w_-]+\.md', p.relative_to(ROOT).as_posix()) for p in files), 'Path rejected by installed updater'
 assert ROOT / 'main.lua' in files and ROOT / '_meta.lua' in files
 local_modules = {p.stem for p in files if p.suffix == '.lua'}
 for path in files:

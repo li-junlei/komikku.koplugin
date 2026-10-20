@@ -46,6 +46,11 @@ function D:init()
             return setmetatable({ close = function()
                 page:close()
                 image:close()
+            end, draw = function(_, dc, bb, ...)
+                local result = page:draw(dc, bb, ...)
+                -- Transform fresh image pixels before caching, never a reused tile or the screen UI.
+                if owner:degrayEnabled() and ok then require("km_degray").apply(bb) end
+                return result
             end }, { __index = function(_, k)
                 local value = page[k]
                 if type(value) == "function" then return function(_, ...) return value(page, ...) end end
@@ -58,6 +63,18 @@ function D:init()
     self.info.has_pages, self.info.configurable = true, true
     self:_readMetadata()
     self.mod_time = tostring(self.mod_time or 0) .. ":" .. tostring(require("socket").gettime())
+end
+
+function D:degrayEnabled()
+    return require("km_app").config.comic_degray == true and not require("device").screen.night_mode
+end
+
+function D:getFullPageHash(...)
+    return Document.getFullPageHash(self, ...) .. (self:degrayEnabled() and "|degray1" or "|degray0")
+end
+
+function D:getPagePartHash(...)
+    return Document.getPagePartHash(self, ...) .. (self:degrayEnabled() and "|degray1" or "|degray0")
 end
 
 function D:getUsedBBox(pageno)

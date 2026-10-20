@@ -59,6 +59,17 @@ function Plugin:addToMainMenu(items)
                 callback = function() self:nextChapter() end },
         },
     }
+    if self.document and self.document.is_komikku then
+        table.insert(items.komikku.sub_item_table, 8, {
+            text = "漫画去灰", checked_func = function() return App.config.comic_degray == true end,
+            callback = function()
+                App.config.comic_degray = not App.config.comic_degray
+                App:saveConfig()
+                self.ui:handleEvent(require("ui/event"):new("RedrawCurrentPage"))
+                UIManager:setDirty(self.ui.dialog, "full")
+            end,
+        })
+    end
 end
 
 function Plugin:menu(title, items)

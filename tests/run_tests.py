@@ -371,28 +371,40 @@ class Checks(unittest.TestCase):
             function base:new(o) local x=self:extend(o); x.info={}; x.configurable={}; x:init(); return x end
             function base:updateColorRendering() self._document:setColorRendering(false) end
             function base:_readMetadata() self.info.number_of_pages=self._document:getPages() end
+            function base:getFullPageHash() return 'full' end
+            function base:getPagePartHash() return 'part' end
             package.loaded['document/pdfdocument'] = base
             package.loaded['document/document'] = base
             package.loaded['document/koptinterface'] = {setDefaultConfigurable=function() end}
-            local App={ cache={directory=function() return '/cache/book' end,
+            local App={config={comic_degray=true}, cache={directory=function() return '/cache/book' end,
                 ensure=function(_,m,d,n) assert(n==2); return '/cache/book/00002.png' end} }
             function App:init() end
             package.loaded.km_app=App
             package.loaded.km_files={read=function() return 'manifest' end}
             package.loaded.json={decode=function() return {address='book',pages={{},{}}} end}
             package.loaded.socket={gettime=function() return 123.123 end}
+            package.loaded.device={screen={night_mode=false}}
+            local enhanced=0
+            package.loaded.km_degray={apply=function(bb) assert(bb.value==128);enhanced=enhanced+1 end}
             local closed_page, closed_doc = false,false
             package.loaded['ffi/mupdf']={openDocument=function(path)
                 assert(path=='/cache/book/00002.png')
                 return {setColorRendering=function() end,close=function() assert(closed_page);closed_doc=true end,
                   openPage=function(_,n) assert(n==1);return {
                     getSize=function() return 758,1024 end,
+                    draw=function(_,dc,bb) bb.value=128 end,
                     close=function() closed_page=true end} end}
             end}
             local doc=require('km_document'):new{file='/cache/book/chapter.kmk'}
             assert(doc.info.number_of_pages==2 and doc.is_komikku)
             local p=doc._document:openPage(2)
             assert(p:getSize()==758 and not closed_doc)
+            p:draw({},{});assert(enhanced==1)
+            assert(doc:getFullPageHash()=='full|degray1' and doc:getPagePartHash()=='part|degray1')
+            package.loaded.device.screen.night_mode=true
+            p:draw({},{});assert(enhanced==1 and doc:getFullPageHash()=='full|degray0')
+            package.loaded.device.screen.night_mode=false;App.config.comic_degray=false
+            p:draw({},{});assert(enhanced==1 and doc:getPagePartHash()=='part|degray0')
             p:close()
             assert(closed_page and closed_doc)
         ''')
@@ -471,6 +483,15 @@ class Checks(unittest.TestCase):
             plugin.document=nil
             plugin:onReaderReady();plugin:onPageUpdate(8)
             assert(#refreshes==2)
+            plugin.document=doc
+            package.loaded['ui/event']={new=function(_,name) return name end}
+            plugin.ui.handleEvent=function(_,event) assert(event=='RedrawCurrentPage') end
+            local saved=0;App.saveConfig=function() saved=saved+1 end
+            plugin:addToMainMenu(mainitems)
+            local toggle=mainitems.komikku.sub_item_table[8]
+            assert(toggle.text=='漫画去灰' and not toggle.checked_func())
+            toggle.callback();assert(toggle.checked_func() and saved==1 and #refreshes==3)
+            toggle.callback();assert(not toggle.checked_func() and saved==2 and #refreshes==4)
         '''.encode())
 
     def test_thumbnail_grid_pagination_layout_callbacks_and_cleanup(self):
@@ -735,6 +756,29 @@ class Checks(unittest.TestCase):
             end
         '''.encode())
 
+
+    def test_degray_curve_stride_and_unsupported_buffer(self):
+        self.lua.execute(b'''
+            local ffi=require('ffi')
+            package.loaded['ffi/blitbuffer']={TYPE_BB8=1}
+            local M=require('km_degray')
+            local data=ffi.new('uint8_t[516]')
+            for row=0,1 do
+                for i=0,255 do data[row*258+i]=i end
+                data[row*258+256]=77;data[row*258+257]=88
+            end
+            local bb={data=data,w=256,h=2,stride=258,getType=function() return 1 end}
+            M.apply(bb)
+            for row=0,1 do
+                assert(data[row*258+18]==0 and data[row*258+238]==255)
+                assert(data[row*258+128]<128)
+                for i=1,255 do assert(data[row*258+i]>=data[row*258+i-1]) end
+                assert(data[row*258+256]==77 and data[row*258+257]==88)
+            end
+            local before=ffi.string(data,516)
+            bb.getType=function() return 2 end;M.apply(bb)
+            assert(before==ffi.string(data,516))
+        ''')
 
 if __name__ == '__main__':
     from test_library import install
