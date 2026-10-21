@@ -5,6 +5,78 @@ from contextlib import closing
 
 
 def install(Checks):
+    def test_statistics_exclusion_survives_consumed_settings_event(self):
+        root = Path(__file__).resolve().parents[1]
+        reference = root / '.reference/koreader-2026.07.2'
+        # Use KOReader's real event propagation, consuming plugin and statistics handlers.
+        sources = [root / 'main.lua', reference / 'plugins/docsettingtweak.koplugin/main.lua',
+                   reference / 'plugins/statistics.koplugin/main.lua']
+        import re
+        modules = set()
+        for source in sources:
+            modules.update(re.findall(rb'require\("([^"]+)"\)', source.read_bytes()))
+        native = {b'ui/widget/widget', b'ui/widget/container/widgetcontainer', b'ui/event'}
+        for module in modules - native:
+            self.lua.globals().package.loaded[module] = self.lua.table()
+        self.lua.execute(b'''
+            local reference=...
+            table.pack=table.pack or function(...) return {n=select('#',...),...} end
+            package.path=package.path..';'..reference..'/frontend/?.lua'
+            package.loaded['ui/geometry']={}
+            package.loaded.datastorage={getDataDir=function() return '/data' end,
+                getSettingsDir=function() return '/settings' end}
+            package.loaded.gettext=setmetatable({}, {__call=function(_,s) return s end})
+            package.loaded['km_app']={init=function() end,find=function() end}
+            package.loaded['km_navigation']={install=function() end}
+            package.loaded['km_statistics']=nil
+            package.loaded.logger={dbg=function() end}
+            package.loaded['document/documentregistry']={known_providers={komikku=true}}
+            local Plugin=assert(loadfile('main.lua'))()
+            local Tweak=assert(loadfile(reference..'/plugins/docsettingtweak.koplugin/main.lua'))()
+            local Stats=assert(loadfile(reference..'/plugins/statistics.koplugin/main.lua'))()
+            local Container=require('ui/widget/container/widgetcontainer')
+            local Event=require('ui/event')
+            local settings={is_enabled=true,min_sec=0,max_sec=120}
+            local config={readSetting=function(_,key,default) return default end}
+            local opens=0
+            package.loaded['lua-ljsqlite3/init'].open=function() opens=opens+1;error('Unexpected statistics DB access') end
+            for _,stats_first in ipairs({true,false}) do
+                local doc={is_komikku=true,km_manifest={}}
+                local ui=Container:new{postInitCallback={},menu={registerToMainMenu=function() end}}
+                function ui:registerPostInitCallback(f) table.insert(self.postInitCallback,f) end
+                ui[1]=Tweak:extend{document=doc}
+                local stats=Stats:extend{document=doc,settings=settings,is_doc=false,is_doc_not_frozen=false,
+                    ui=ui,view={footer={maybeUpdateFooter=function() end}}}
+                stats:resetVolatileStats()
+                if stats_first then ui.statistics=stats;table.insert(ui,stats) end
+                local plugin=Plugin:new{ui=ui,document=doc}
+                table.insert(ui,plugin)
+                if not stats_first then ui.statistics=stats;table.insert(ui,stats) end
+                assert(ui:handleEvent(Event:new('DocSettingsLoad',config,doc))==true)
+                assert(not stats._komikku_excluded) -- The consumed event cannot install our guard.
+                assert(#ui.postInitCallback==1)
+                for _,f in ipairs(ui.postInitCallback) do f() end
+                assert(stats._komikku_excluded)
+                stats:handleEvent(Event:new('ReaderReady',config))
+                for page=1,60 do stats:handleEvent(Event:new('PageUpdate',page)) end
+                for _,event in ipairs({'SaveSettings','Suspend','Resume','CloseDocument'}) do
+                    stats:handleEvent(Event:new(event))
+                end
+                stats:initData();stats:getIdBookDB();stats:insertDB()
+                assert(opens==0 and not stats.id_curr_book and next(stats.page_stat)==nil)
+                assert(not stats:isEnabled() and not stats:isEnabledAndNotFrozen())
+            end
+            local created,writes=0,0
+            local novel=Stats:extend{document={},settings=settings,view={footer={maybeUpdateFooter=function() end}},
+                initData=function(self) self.is_doc=true;self.is_doc_not_frozen=true;created=created+1 end,
+                insertDB=function() writes=writes+1 end}
+            require('km_statistics').exclude({statistics=novel},novel.document)
+            novel:resetVolatileStats()
+            novel:handleEvent(Event:new('ReaderReady',config))
+            novel:handleEvent(Event:new('CloseDocument'))
+            assert(created==1 and writes==1 and settings.is_enabled)
+        ''', reference.as_posix().encode())
+
     def test_statistics_exclusion_is_instance_only(self):
         self.lua.execute(b'''
             local writes,created=0,0

@@ -36,6 +36,10 @@ function Plugin:init()
     if not registry.known_providers.komikku then require("km_document"):register(registry) end
     if self.ui and self.ui.menu then self.ui.menu:registerToMainMenu(self) end
     if self.document and self.document.is_komikku then
+        -- DocSettingsLoad can be consumed by docsettingtweak before reaching this plugin.
+        self.ui:registerPostInitCallback(function()
+            require("km_statistics").exclude(self.ui, self.document)
+        end)
         require("km_navigation").install(self.ui, self.document, self)
         local m = self.document.km_manifest
         self.manga, self.chapter = App:find(m.manga_key, m.chapter_key)
@@ -66,10 +70,6 @@ function Plugin:addToMainMenu(items)
             end,
         })
     end
-end
-
-function Plugin:onDocSettingsLoad()
-    require("km_statistics").exclude(self.ui, self.document)
 end
 
 function Plugin:menu(title, items)

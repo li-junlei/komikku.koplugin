@@ -19,6 +19,11 @@
 
 这是可安装测试版。自动化检查通过不代表真实账号、Kindle 的 TLS 或原生绘制已获验证。
 
+## 0.4.4 更新
+
+- 修复漫画仍出现在阅读统计、日历和时间线中的问题：内置的“文档设置微调”插件会消费设置加载事件，使旧版屏蔽未执行。现在改在所有插件加载完成后、阅读统计初始化前屏蔽当前漫画的统计实例。
+- 不依赖阅读后的清理，不改变普通书籍的统计设置。已产生的旧记录仍需使用 **设置 → 清理本插件旧阅读记录** 清理一次。
+
 ## 0.4.3 更新
 
 - Komga 书库列表模式不再固定六条：每次请求 50 条，由 KOReader 按屏幕容量自然分页显示；封面模式继续六本一页。
@@ -63,7 +68,7 @@
 - 保留旧插件目录 `komikku.koplugin.previous`，配置、书架、缓存和阅读进度不属于更新目录。安装完成后提示重启 KOReader。
 - 保留 0.2.1/0.2.2 的书库响应修复和手动同步来源选择。
 
-首次安装本版仍需手动解压 Release 的 `komikku-koplugin-0.4.3.zip` 至 `koreader/plugins/`；之后可在插件第一层的更新菜单中更新。不要下载 GitHub 自动生成的 Source code ZIP 作为安装包。无需 GitHub 账号或令牌，更新请求不会发送 Komga / WebDAV 账号。版本信息直接读取 Release 的 `update.json`，不消耗 GitHub API 匿名请求额度。
+首次安装本版仍需手动解压 Release 的 `komikku-koplugin-0.4.4.zip` 至 `koreader/plugins/`；之后可在插件第一层的更新菜单中更新。不要下载 GitHub 自动生成的 Source code ZIP 作为安装包。无需 GitHub 账号或令牌，更新请求不会发送 Komga / WebDAV 账号。版本信息直接读取 Release 的 `update.json`，不消耗 GitHub API 匿名请求额度。
 
 请先关闭漫画并等待同步完成，再安装更新。GitHub 访问受限时会报错，可稍后重试或手动下载。安装时不要断电；如果断电恰好发生在目录替换之间，可将 `koreader/plugins/komikku.koplugin.previous` 恢复为 `komikku.koplugin`，或重新解压安装包，设备数据仍保存在原位置。
 
