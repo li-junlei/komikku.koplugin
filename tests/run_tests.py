@@ -187,6 +187,7 @@ class Checks(unittest.TestCase):
             function history:updateLastBookTime() self.updates = self.updates + 1; self.hist[1].time = 99 end
             local reader = {}
             package.loaded.readhistory = history
+            package.loaded.readcollection = {updateLastBookTime=function() end}
             package.loaded['ffi/util'] = { realpath = function(s) return s end }
             package.loaded['apps/reader/readerui'] = reader
             require('km_history').install('/data/komikku/chapters')
@@ -469,7 +470,7 @@ class Checks(unittest.TestCase):
             menus[3].items[1].callback()
             assert(events.open==test_shelf.mangas[1].chapters[1].url)
             plugin:settings()
-            assert(#menus[4].items==5)
+            assert(#menus[4].items==6)
             local mainitems={};plugin:addToMainMenu(mainitems)
             assert(mainitems.komikku and #mainitems.komikku.sub_item_table==7)
             local App=package.loaded.km_app
@@ -849,4 +850,6 @@ if __name__ == '__main__':
     install_storage(Checks)
     from test_pageload import install as install_pageload
     install_pageload(Checks)
+    from test_privacy import install as install_privacy
+    install_privacy(Checks)
     unittest.main(verbosity=2)

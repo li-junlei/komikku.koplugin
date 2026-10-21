@@ -68,6 +68,10 @@ function Plugin:addToMainMenu(items)
     end
 end
 
+function Plugin:onDocSettingsLoad()
+    require("km_statistics").exclude(self.ui, self.document)
+end
+
 function Plugin:menu(title, items)
     local menu
     menu = Menu:new{
@@ -433,10 +437,32 @@ function Plugin:settings()
         { text = "Komga 连接", callback = function() self:connectionSettings("komga") end },
         { text = "Komga 同步来源", callback = function() require("km_library").sourceSettings(self) end },
         { text = "同步", callback = function() self:syncSettings() end },
+        { text = "清理本插件旧阅读记录", callback = function() self:cleanReadingRecords() end },
         { text = "自定义 CA 证书路径（可选）", callback = function() self:caSetting() end },
         { text = "说明", callback = function()
             message("Komga 与 WebDAV 地址均使用 HTTPS。同步目录与手机保持一致；留空表示 WebDAV 地址的根目录。\n\n默认在线阅读，预取后续 2 页；缓存管理中可设置在线缓存上限，默认 128 MiB，0 表示关闭自动清理。最早阅读的章节优先清理，当前章节和手动离线下载受保护。\n\n账号信息保存在设备本地设置文件，请保管设备及备份。")
         end },
+    })
+end
+
+function Plugin:cleanReadingRecords()
+    if self.document and self.document.is_komikku and self.document.is_open then
+        message("请先返回文件管理器，再清理旧阅读记录。") return
+    end
+    UIManager:show(require("ui/widget/confirmbox"):new{
+        text = "清理能通过本插件书籍设置确认归属的旧阅读统计？会先备份统计数据库。普通书籍、漫画进度和同步数据保留。",
+        ok_callback = function()
+            Trapper:wrap(function()
+                local result = worker(function()
+                    local count, backup = require("km_statistics").clean(App.cache.root, App.root)
+                    return { count = count, backup = backup }
+                end, "正在备份并清理本插件旧阅读统计…")
+                if result then
+                    require("km_history").prune()
+                    message("已清理 " .. result.count .. " 部可确认归属的章节统计。缓存及书籍设置都已丢失的旧记录需在 KOReader 统计中手动删除。")
+                end
+            end)
+        end,
     })
 end
 
