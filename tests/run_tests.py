@@ -377,7 +377,9 @@ class Checks(unittest.TestCase):
             package.loaded['document/document'] = base
             package.loaded['document/koptinterface'] = {setDefaultConfigurable=function() end}
             local App={config={comic_degray=true}, cache={directory=function() return '/cache/book' end,
-                ensure=function(_,m,d,n) assert(n==2); return '/cache/book/00002.png' end} }
+                ensure=function() error('rendering must never download') end,
+                hasPage=function(_,dir,n) return n==2 end,
+                pagePath=function(_,dir,n) assert(n==2);return '/cache/book/00002.png' end} }
             function App:init() end
             package.loaded.km_app=App
             package.loaded.km_files={read=function() return 'manifest' end}
@@ -407,6 +409,16 @@ class Checks(unittest.TestCase):
             p:draw({},{});assert(enhanced==1 and doc:getPagePartHash()=='part|degray0')
             p:close()
             assert(closed_page and closed_doc)
+            local placeholder=false
+            package.loaded['ffi/mupdf'].openDocumentFromText=function()
+                placeholder=true
+                return {layoutDocument=function() end,setColorRendering=function() end,close=function() end,
+                    openPage=function() return {getSize=function() return 758,1024 end,close=function() end} end}
+            end
+            local missing=doc._document:openPage(1)
+            assert(placeholder and missing:getSize()==758)
+            missing:close()
+            doc:hintPage(1) -- no future-page rendering or network on the UI thread
         ''')
 
     def test_menu_settings_and_reader_lifecycle(self):
@@ -426,6 +438,7 @@ class Checks(unittest.TestCase):
             end
             package.loaded['ui/trapper']={wrap=function(_,f) f() end,
                 dismissableRunInSubprocess=function(_,f) return true,f() end}
+            package.loaded.km_pageload={start=function() return true end,stop=function() end}
             package.loaded['ui/network/manager']={isConnected=function() return false end}
             package.loaded['document/documentregistry']={known_providers={komikku=true}}
             package.loaded.device={screen={getWidth=function() return 758 end}}
@@ -815,9 +828,11 @@ class Checks(unittest.TestCase):
             local doc={is_komikku=true,is_open=true,file='/cache/chapter.kmk'}
             local owner={readerContents=function() events[#events+1]='contents' end}
             local ui={document=doc,toc={onShowToc=function() events[#events+1]='native-toc' end},
+                hinting={onHintPage=function() error('must not render future pages on UI thread') end},
                 onClose=function(self) events[#events+1]='close';self.document.is_open=false;self.document=nil end,
                 showFileManager=function() events[#events+1]='browser' end}
             N.install(ui,doc,owner)
+            assert(ui.hinting:onHintPage())
             ui.toc:onShowToc()
             assert(events[1]=='contents')
             ui:showFileManager(doc.file)
@@ -832,4 +847,6 @@ if __name__ == '__main__':
     install_update(Checks)
     from test_storage import install as install_storage
     install_storage(Checks)
+    from test_pageload import install as install_pageload
+    install_pageload(Checks)
     unittest.main(verbosity=2)

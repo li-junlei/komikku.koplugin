@@ -263,7 +263,7 @@ function Plugin:openChapter(m, c)
     local function run()
         Trapper:wrap(function()
             App.cache:stopPrefetch()
-            local result = worker(function() return self:prepareChapter(m, c, false) end,
+            local result = worker(function() return self:prepareChapter(m, c, true) end,
                 "正在准备漫画…（点击可取消）")
             if not result then return end
             local path = result.dir .. "/chapter.kmk"
@@ -523,6 +523,7 @@ function Plugin:onReaderReady()
     if self.document and self.document.is_komikku then UIManager:setDirty(self.ui.dialog, "full") end
     if not self.chapter then return end
     local doc = self.document
+    if not require("km_pageload").start(self) then return end
     App.cache:prefetch(doc.km_manifest, doc.km_dir, self.ui:getCurrentPage())
 end
 
@@ -532,15 +533,17 @@ function Plugin:onPageUpdate(page)
     UIManager:nextTick(function()
         if not self.document or not self.document.is_open then return end
         local doc = self.document
+        if self.ui:getCurrentPage() ~= page then return end
+        if not require("km_pageload").start(self) then return end
         local ok, err = pcall(App.record, App, self.manga, self.chapter, page, doc:getPageCount(), doc.km_dir)
         if not ok then message(errorText(err)) end
-        if doc.km_error then message(doc.km_error); doc.km_error = nil end
         App.cache:prefetch(doc.km_manifest, doc.km_dir, page)
     end)
 end
 
 function Plugin:onSuspend()
     if self.chapter then
+        require("km_pageload").stop(self)
         App.cache:stopPrefetch()
         local ok, err = pcall(App.record, App, self.manga, self.chapter, self.ui:getCurrentPage(),
             self.document:getPageCount(), self.document.km_dir)
@@ -569,7 +572,10 @@ function Plugin:onNetworkConnected()
 end
 
 function Plugin:onResume()
-    if self.chapter and NetworkMgr:isConnected() then self:onNetworkConnected() end
+    if self.chapter and NetworkMgr:isConnected() then
+        self:onNetworkConnected()
+        UIManager:nextTick(function() if self.chapter then require("km_pageload").start(self) end end)
+    end
 end
 
 return Plugin

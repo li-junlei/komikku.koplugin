@@ -33,8 +33,17 @@ function K.pages(config, address)
 end
 
 function K.downloadPage(config, address, page, path)
+    local original = page.mediaType == "image/jpeg" or page.mediaType == "image/png"
+    os.remove(path .. ".total")
     local bytes, code = H.request(config, "komga", "GET", K.bookUrl(config, address)
-        .. "/pages/" .. page.number .. "?convert=png", nil, nil, path)
+        .. "/pages/" .. page.number .. (original and "" or "?convert=png"), nil, nil, path,
+        function(status, headers)
+            if tonumber(status) == 200 then
+                local total = tonumber(headers["content-length"])
+                if total and total > 0 then require("km_files").write(path .. ".total", tostring(total)) end
+            end
+        end)
+    os.remove(path .. ".total")
     assert(code == 200 and bytes > 0, "页面下载失败（HTTP " .. tostring(code) .. "）")
 end
 

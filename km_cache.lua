@@ -84,7 +84,9 @@ function C:stopPrefetch()
             if dir and lfs.attributes(dir, "mode") == "directory" then
                 for name in lfs.dir(dir) do
                     local suffix = ".prefetch-" .. pid
-                    if name:sub(-#suffix) == suffix or name:sub(-#(suffix .. ".part")) == suffix .. ".part" then
+                    if name:sub(-#suffix) == suffix or name:sub(-#(suffix .. ".part")) == suffix .. ".part"
+                        or name:sub(-#(suffix .. ".total")) == suffix .. ".total"
+                        or name:sub(-#(suffix .. ".total.tmp")) == suffix .. ".total.tmp" then
                         os.remove(dir .. "/" .. name)
                     end
                 end
@@ -99,6 +101,8 @@ function C:stopPrefetch()
             require("ui/uimanager"):scheduleIn(0.5, reap)
         else cleanup() end
         self.pid = nil
+        self.prefetch_pages = nil
+        self.prefetch_order = nil
         require("ui/uimanager"):allowStandby()
     end
     if self.poll then require("ui/uimanager"):unschedule(self.poll); self.poll = nil end
@@ -113,28 +117,53 @@ function C:prefetch(m, dir, current)
         if not self:hasPage(dir, page) then pages[#pages + 1] = page end
     end
     if #pages == 0 then return end
+    return self:startPages(m, dir, pages)
+end
+
+function C:startPages(m, dir, pages)
+    self:stopPrefetch()
     local ffiutil = require("ffi/util")
     local ui = require("ui/uimanager")
     local pid = ffiutil.runInSubProcess(function(child_pid)
         for _, page in ipairs(pages) do
             local path = self:pagePath(dir, page)
             local tmp = path .. ".prefetch-" .. child_pid
-            local ok = pcall(K.downloadPage, self.config, m.address, m.pages[page], tmp)
-            if ok then os.rename(tmp, path) else os.remove(tmp .. ".part"); break end
+            if not self:hasPage(dir, page) then
+                local ok = pcall(K.downloadPage, self.config, m.address, m.pages[page], tmp)
+                if ok then
+                    if not os.rename(tmp, path) then os.remove(tmp); break end
+                else os.remove(tmp .. ".part"); os.remove(tmp .. ".total"); break end
+            end
         end
     end, false)
     if not pid then return end
     self.pid = pid
     self.prefetch_dir = dir
+    self.prefetch_pages = {}
+    self.prefetch_order = pages
+    for _, page in ipairs(pages) do self.prefetch_pages[page] = true end
     ui:preventStandby()
     self.poll = function()
         if ffiutil.isSubProcessDone(pid) then
-            self.pid, self.poll = nil, nil
+            self.pid, self.poll, self.prefetch_pages, self.prefetch_order = nil, nil, nil, nil
             ui:allowStandby()
             self:evict(dir)
         else ui:scheduleIn(0.5, self.poll) end
     end
     ui:scheduleIn(0.5, self.poll)
+    return true
+end
+
+function C:pageProgress(dir, page)
+    local path = self:pagePath(dir, page)
+    if self:hasPage(dir, page) then
+        local size = lfs.attributes(path, "size")
+        return size, size, true
+    end
+    if self.pid and self.prefetch_dir == dir and self.prefetch_pages and self.prefetch_pages[page] then
+        path = path .. ".prefetch-" .. self.pid
+    end
+    return lfs.attributes(path .. ".part", "size") or 0, tonumber(F.read(path .. ".total")), false
 end
 
 function C:entries(metadata)

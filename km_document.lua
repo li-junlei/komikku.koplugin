@@ -29,15 +29,17 @@ function D:init()
         openPage = function(_, number)
             assert(number >= 1 and number <= #m.pages, "页码越界")
             local pdf = require("ffi/mupdf")
-            local ok, path = pcall(App.cache.ensure, App.cache, m, dir, number)
+            local ok = App.cache:hasPage(dir, number)
+            local path = ok and App.cache:pagePath(dir, number)
             local image
             if ok then
                 local opened, result = pcall(pdf.openDocument, path)
-                if opened then image = result else os.remove(path); ok = false end
+                if opened then image = result else os.remove(path); owner.km_bad_page = number; ok = false end
             end
             if not ok then
-                owner.km_error = "页面加载失败。请检查网络，在插件菜单中选择“重试当前章节”。"
-                image = pdf.openDocumentFromText("<html><body><h2>Page unavailable</h2><p>Check Wi-Fi, then retry this chapter from the Komikku menu.</p></body></html>", "text/html")
+                local status = owner.km_page_status and owner.km_page_status[number]
+                local title = status == "cancelled" and "Download cancelled" or (status == "failed" and "Page unavailable" or "Loading page...")
+                image = pdf.openDocumentFromText("<html><body><h2>" .. title .. "</h2><p>Wait for the progress dialog, or turn to another page. Retry this chapter from the contents menu.</p></body></html>", "text/html")
                 image:layoutDocument(758, 1024, 22)
             end
             image:setColorRendering(color)
@@ -63,6 +65,7 @@ function D:init()
     self.info.has_pages, self.info.configurable = true, true
     self:_readMetadata()
     self.mod_time = tostring(self.mod_time or 0) .. ":" .. tostring(require("socket").gettime())
+    self.km_original_mod_time = self.mod_time
 end
 
 function D:degrayEnabled()
@@ -85,6 +88,8 @@ function D:getUsedBBox(pageno)
 end
 
 function D:layoutDocument() end
+-- Network prefetch already runs in a low-priority process; native hinting renders on the UI thread.
+function D:hintPage() end
 function D:getEmbeddedAnnotations() return {} end
 function D:writeDocument() end
 

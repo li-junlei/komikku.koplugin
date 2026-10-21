@@ -3,6 +3,10 @@ local N = {}
 function N.install(ui, document, owner)
     if not document or not document.is_komikku or ui._komikku_navigation then return end
     ui._komikku_navigation = true
+    if ui.hinting then
+        -- Native hinting also computes future-page zoom before calling document:hintPage().
+        ui.hinting.onHintPage = function() return true end
+    end
     if owner and ui.toc then
         local show_toc = ui.toc.onShowToc
         function ui.toc:onShowToc(...)

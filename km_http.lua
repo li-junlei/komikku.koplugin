@@ -58,7 +58,7 @@ local function verifiedSocket(cafile)
     end
 end
 
-function H.request(config, service, method, address, body, extra, destination)
+function H.request(config, service, method, address, body, extra, destination, on_headers)
     local url = require("socket.url")
     local parsed = url.parse(address)
     assert(parsed and parsed.scheme == "https" and parsed.host and not parsed.userinfo
@@ -69,7 +69,7 @@ function H.request(config, service, method, address, body, extra, destination)
     local user, password = config[service .. "_user"] or "", config[service .. "_password"] or ""
     assert(not user:find(":"), "用户名不能包含冒号")
     if service ~= "github" then headers.Authorization = "Basic " .. require("mime").b64(user .. ":" .. password) end
-    local timeout = service == "github" and destination and 600 or 45
+    local timeout = service == "github" and destination and 600 or (on_headers and 300 or 45)
     if body then headers["Content-Length"] = tostring(#body); headers["Content-Type"] = "application/octet-stream" end
     for k, v in pairs(extra or {}) do headers[k] = v end
     local parts, size, limit = {}, 0, destination and 32 * 1024 * 1024 or 64 * 1024 * 1024
@@ -94,6 +94,7 @@ function H.request(config, service, method, address, body, extra, destination)
     local ok, result, code, response_headers = pcall(require("socket.http").request, {
         url = url.build(parsed), method = method, headers = headers, redirect = false,
         create = verifiedSocket(config.ca_file ~= "" and config.ca_file or "data/ca-bundle.crt"),
+        response_headers = on_headers,
         source = body and ltn12.source.string(body) or nil, sink = sink,
     })
     socketutil:reset_timeout()
