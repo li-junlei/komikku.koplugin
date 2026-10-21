@@ -34,9 +34,9 @@ function L.sourceSettings(owner)
                 { text = "取消", callback = function() UIManager:close(dialog) end },
                 { text = "保存", callback = function()
                     local id = dialog:getInputText():match("^%s*(.-)%s*$")
-                    local template = id ~= "" and C.template({ komga_source_id = id }, shelf)
-                    if id == "" or not template then
-                        message("该 ID 不在已同步的手机书架中。请选择下方已有漫画的来源，或先同步包含该来源的手机书架。")
+                    local valid = pcall(C.sourceBytes, id)
+                    if not valid then
+                        message("请填写完整、有效的十进制来源 ID。与手机同步时应使用手机 Komga 扩展对应的 ID。")
                         return
                     end
                     save(id); UIManager:close(dialog)
@@ -46,14 +46,14 @@ function L.sourceSettings(owner)
         UIManager:show(dialog); dialog:onShowKeyboard()
     end }
     for _, m in ipairs(shelf and shelf.mangas or {}) do
-        if not seen[m.source] then
+        if C.isKomga(m) and not seen[m.source] then
             seen[m.source] = true
             local id = C.sourceId(m.source)
             items[#items + 1] = { text = (id == App.config.komga_source_id and "✓ " or "")
                 .. m.title .. " · ID " .. id, callback = function() save(id) end }
         end
     end
-    owner:menu("选择手机 Komga 漫画的来源", items)
+    owner:menu("Komga 同步来源（独立使用无需设置）", items)
 end
 
 function L.open(owner, worker)
@@ -198,14 +198,14 @@ function L.filters(state)
     for _, role in ipairs(sorted) do
         items[#items + 1] = { text = "作者 · " .. role, callback = function() selectMany(state, role, "author", roles[role]) end }
     end
-    items[#items + 1] = { text = "章节命名（与手机一致）", callback = function() L.chapterSettings(state) end }
+    items[#items + 1] = { text = "章节命名", callback = function() L.chapterSettings(state) end }
     state.owner:menu("Komga 筛选（与手机扩展相同规则）", items)
 end
 
 function L.chapterSettings(state)
     local dialog
     dialog = require("ui/widget/multiinputdialog"):new{
-        title = "与手机 Komga 扩展设置保持一致",
+        title = "章节命名（同步时与手机保持一致）",
         fields = {
             { description="章节名称模板",text=App.config.komga_chapter_template or "{number} - {title} ({size})" },
             { description="译者分隔符",text=App.config.komga_scanlator_separator or "," },
@@ -223,19 +223,15 @@ function L.chapterSettings(state)
 end
 
 function L.select(state, item)
-    state.template = C.template(App.config, App:reloadShelf())
-    if not state.template then
-        message("无法自动匹配手机来源。请在设置 → Komga 同步来源中，选择手机书架里可正常阅读的 Komga 漫画所用来源。")
-        return
-    end
+    state.template = C.template(App.config, App:reloadShelf()) or C.defaultTemplate(App.config)
     request(state.worker, function() return C.prepare(App.config, state.template, item) end, function(manga)
         App:remember(manga)
         local existing = App:find(manga.key)
         local target = existing and #existing.chapters > 0 and existing or manga
         state.owner:menu(manga.title, {
             { text = "阅读 / 章节列表", callback = function() state.owner:chapters(target) end },
-            { text = existing and existing.favorite and "已在 Komikku 书架" or "加入 Komikku 书架",
-                select_enabled = not (existing and existing.favorite), callback = function() L.chooseCategory(state, manga) end },
+            { text = existing and existing.favorite and "管理书架收藏" or "加入书架",
+                callback = function() L.manage(state.owner, target, state.worker) end },
             { text = "简介", callback = function() message(require("km_proto").get(manga.fields, 6, "", 2)) end },
             { text = "返回书库", callback = function() L.render(state, true) end },
         })
@@ -245,22 +241,70 @@ end
 function L.chooseCategory(state, manga)
     local items = {}
     local function add(category)
-        if App.syncing then message("正在同步，请完成后再加入。") return end
-        Network:runWhenConnected(function()
-            App.syncing = true
-            Trapper:wrap(function()
-                local ok, result = pcall(App.addToShelf, App, manga, category, state.worker)
-                App.syncing = false
-                if ok and result then message("已加入 Komikku 书架。手机再次同步后即可看到。")
-                elseif not ok then message(tostring(result):gsub("^.-:%d+: ", "")) end
-            end)
-        end)
+        if App.syncing then message("正在同步，请完成后再操作。") return end
+        local ok, result = pcall(App.addToShelf, App, manga, category)
+        if not ok then message(tostring(result):gsub("^.-:%d+: ", "")); return end
+        message("已保存到书架。")
+        L.autoSync(state.owner)
     end
     items[#items + 1] = { text = "未分类", callback = function() add(-1) end }
     for _, category in ipairs(App.shelf.categories) do
         items[#items + 1] = { text = category.name, callback = function() add(category.order) end }
     end
+    items[#items+1] = {text="新建分类",callback=function()
+        L.newCategory(state.owner, function(order) add(order) end)
+    end}
     state.owner:menu("加入到哪个分类？", items)
+end
+
+function L.autoSync(owner)
+    if App.config.webdav_url and App.config.webdav_url ~= "" and App.config.auto_sync ~= false
+            and Network:isConnected() then owner:sync() end
+end
+
+function L.newCategory(owner, after)
+    local dialog
+    dialog = require("ui/widget/inputdialog"):new{
+        title="新建书架分类", input="", buttons={{
+            {text="取消",callback=function() UIManager:close(dialog) end},
+            {text="保存",callback=function()
+                if App.syncing then message("正在同步，请完成后再操作。"); return end
+                local ok, order = pcall(App.addCategory, App, dialog:getInputText())
+                if not ok then message(tostring(order):gsub("^.-:%d+: ", "")); return end
+                UIManager:close(dialog); after(order)
+            end},
+        }},
+    }
+    UIManager:show(dialog); dialog:onShowKeyboard()
+end
+
+function L.manage(owner, m, worker)
+    local current = App:find(m.key) or m
+    if not current.favorite then L.chooseCategory({owner=owner,worker=worker},current); return end
+    owner:menu(current.title .. " · 书架", {
+        {text="更改分类",callback=function() L.chooseCategory({owner=owner,worker=worker},current) end},
+        {text="移出书架",callback=function()
+            UIManager:show(require("ui/widget/confirmbox"):new{
+                text="将此漫画移出书架？阅读进度和已下载图片保留。",
+                ok_callback=function()
+                    if App.syncing then message("正在同步，请完成后再操作。"); return end
+                    local ok, err = pcall(App.setFavorite,App,current,false)
+                    if not ok then message(tostring(err):gsub("^.-:%d+: ", "")); return end
+                    message("已移出书架。"); L.autoSync(owner)
+                end,
+            })
+        end},
+    })
+end
+
+function L.refresh(owner, m, worker)
+    local kind, id = m.url:match("/api/v1/([%w]+)/([%w_-]+)$")
+    request(worker,function()
+        return C.prepare(App.config,{source=m.source,url=m.url},{kind=kind,id=id,title=m.title})
+    end,function(fresh)
+        App:remember(fresh)
+        owner:chapters(App:find(fresh.key) or fresh)
+    end,"正在刷新漫画与章节…")
 end
 
 return L

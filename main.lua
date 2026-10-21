@@ -11,6 +11,7 @@ local F = require("km_files")
 local Plugin = WidgetContainer:extend{ name = "komikku", is_doc_only = false }
 
 local function message(text) UIManager:show(InfoMessage:new{ text = text }) end
+local function hasSync() return App.config.webdav_url and App.config.webdav_url ~= "" end
 
 local function errorText(err)
     -- Do not show remote response bodies, URLs containing credentials, or request headers.
@@ -111,14 +112,14 @@ function Plugin:sync(after)
 end
 
 function Plugin:openShelf()
-    if App.config.auto_sync ~= false and NetworkMgr:isConnected() and App.config.webdav_url then
+    if App.config.auto_sync ~= false and NetworkMgr:isConnected() and hasSync() then
         self:sync(function() self:shelf() end)
     else self:shelf() end
 end
 
 function Plugin:shelf(category, page, cached_only)
     local shelf = App:reloadShelf()
-    if not shelf then message("书架为空。请在手机启用书架、分类和章节同步，然后在设置的同步菜单中同步。离线时可从“缓存管理”进入。") return end
+    if not shelf then message("书架为空。请配置 Komga 后浏览书库，将漫画加入书架。") return end
     local items, mangas = {}, {}
     items[#items + 1] = { text = "缩略图模式（每页 6 本）", callback = function()
         App.config.shelf_view = "covers"; App:saveConfig(); self:shelf(category)
@@ -141,7 +142,10 @@ function Plugin:shelf(category, page, cached_only)
                 callback = function() self:chapters(m) end }
         end
     end
-    if App.config.shelf_view == "covers" then self:coverShelf(mangas, category, page, cached_only); return end
+    if #mangas == 0 then items[#items+1] = {text="浏览 Komga 书库并加入书架",callback=function()
+        require("km_library").open(self,worker)
+    end} end
+    if App.config.shelf_view == "covers" and #mangas > 0 then self:coverShelf(mangas, category, page, cached_only); return end
     self:menu("Komikku 书架", items)
 end
 
@@ -213,6 +217,11 @@ function Plugin:categories()
     for _, c in ipairs(App.shelf.categories) do
         items[#items + 1] = { text = c.name, callback = function() self:shelf(c.order) end }
     end
+    items[#items+1] = {text="新建分类",callback=function()
+        require("km_library").newCategory(self,function(order)
+            self:shelf(order); require("km_library").autoSync(self)
+        end)
+    end}
     self:menu("书架分类", items)
 end
 
@@ -234,8 +243,7 @@ function Plugin:chapters(m)
     end
     if first then items[#items + 1] = { text = "继续阅读：" .. first.name, callback = function() self:openChapter(m, first) end } end
     if #chapters == 0 then
-        message("同步文件中没有章节。请在手机获取章节列表，并开启章节同步后重新同步。")
-        return
+        items[#items+1] = {text="暂无章节，请刷新章节",select_enabled=false}
     end
     for _, c in ipairs(chapters) do
         local p = App:current(m, c)
@@ -243,6 +251,10 @@ function Plugin:chapters(m)
             mandatory = p.page > 0 and ("第 " .. (p.page + 1) .. " 页") or nil,
             callback = function() self:chapterActions(m, c) end }
     end
+    items[#items+1] = {text="刷新章节",callback=function() require("km_library").refresh(self,m,worker) end}
+    items[#items+1] = {text=m.favorite and "管理书架收藏" or "加入书架",callback=function()
+        require("km_library").manage(self,m,worker)
+    end}
     self:menu(m.title, items)
 end
 
@@ -440,7 +452,7 @@ function Plugin:settings()
         { text = "清理本插件旧阅读记录", callback = function() self:cleanReadingRecords() end },
         { text = "自定义 CA 证书路径（可选）", callback = function() self:caSetting() end },
         { text = "说明", callback = function()
-            message("Komga 与 WebDAV 地址均使用 HTTPS。同步目录与手机保持一致；留空表示 WebDAV 地址的根目录。\n\n默认在线阅读，预取后续 2 页；缓存管理中可设置在线缓存上限，默认 128 MiB，0 表示关闭自动清理。最早阅读的章节优先清理，当前章节和手动离线下载受保护。\n\n账号信息保存在设备本地设置文件，请保管设备及备份。")
+            message("配置 Komga 即可浏览、阅读和管理书架。WebDAV 为可选同步功能，地址留空即可独立使用。两种地址均使用 HTTPS。\n\n默认在线阅读，预取后续 2 页；在线缓存默认上限 128 MiB，0 表示关闭自动清理。当前章节和手动离线下载受保护。\n\n账号信息保存在设备本地设置文件，请保管设备及备份。")
         end },
     })
 end
@@ -482,11 +494,14 @@ function Plugin:connectionSettings(service)
         buttons = { {
             { text = "取消", callback = function() UIManager:close(dialog) end },
             { text = "保存", callback = function()
+                if App.syncing then message("正在同步，请完成后再更改连接设置。"); return end
                 local values = dialog:getFields()
-                local ok, base = pcall(Http.validateBase, values[1]:match("^%s*(.-)%s*$"))
+                local address = values[1]:match("^%s*(.-)%s*$")
+                local ok, base = true, ""
+                if service ~= "webdav" or address ~= "" then ok, base = pcall(Http.validateBase, address) end
                 if not ok then message(errorText(base)); return end
                 if values[2]:find(":") then message("用户名不能包含冒号"); return end
-                if service == "webdav" then
+                if service == "webdav" and base ~= "" then
                     local valid, err = pcall(Http.webdavUrl, { webdav_url = base, webdav_folder = values[4] })
                     if not valid then message(errorText(err)); return end
                 end
@@ -495,7 +510,8 @@ function Plugin:connectionSettings(service)
                 if identity_changed and self.chapter then
                     message("请先关闭漫画，再更换连接地址、用户或同步目录。") return
                 end
-                if service == "webdav" and next(App.state.pending) and (
+                if service == "webdav" and base ~= "" and hasSync()
+                        and (next(App.state.pending) or next(App.state.shelf_changes or {})) and (
                     base ~= App.config.webdav_url or values[2] ~= App.config.webdav_user
                     or values[4] ~= App.config.webdav_folder) then
                     message("还有待同步进度。请先同步，再更换 WebDAV 地址、用户或目录。") return
@@ -505,10 +521,10 @@ function Plugin:connectionSettings(service)
                 if service == "webdav" and identity_changed then App.config.komga_source_id = nil end
                 App:saveConfig()
                 if identity_changed and service == "webdav" then
-                    local old = F.read(App.root .. "/shelf.proto")
-                    if old then F.write(App.root .. "/shelf.previous.proto", old); os.remove(App.root .. "/shelf.proto") end
-                    App.shelf = nil
-                    App.state.last = nil
+                    App.state.shelf_changes = App.state.shelf_changes or {}
+                    for _, m in ipairs(App:reloadShelf().mangas) do
+                        if m.favorite then App.state.shelf_changes[m.key] = true end
+                    end
                     App:saveState()
                 end
                 UIManager:close(dialog)
@@ -537,9 +553,15 @@ function Plugin:caSetting()
 end
 
 function Plugin:status()
-    local n = 0
+    local n, favorites, changes = 0, 0, 0
     for _ in pairs(App.state.pending) do n = n + 1 end
-    message("书架：" .. (App.shelf and #App.shelf.mangas or 0) .. " 部\n待同步章节：" .. n
+    for _ in pairs(App.state.shelf_changes or {}) do changes = changes+1 end
+    for _, m in ipairs(App:reloadShelf().mangas) do if m.favorite then favorites = favorites+1 end end
+    if not hasSync() then
+        message("书架：" .. favorites .. " 部\n同步未配置，书架与阅读进度保存在设备上，可正常独立使用。")
+        return
+    end
+    message("书架：" .. favorites .. " 部\n待同步章节：" .. n .. "\n待同步收藏：" .. changes
         .. "\n上次同步：" .. (App.state.last_sync and os.date("%Y-%m-%d %H:%M", App.state.last_sync) or "尚未同步")
         .. "\n\n未匹配到远端章节的进度会继续保留，不会复活手机已删除的收藏。")
 end
@@ -586,13 +608,13 @@ function Plugin:onCloseDocument()
         local ok, err = pcall(App.cache.evict, App.cache)
         if not ok then message(errorText(err)) end
     end)
-    if App.config.auto_sync ~= false and App.config.webdav_url and NetworkMgr:isConnected() then
+    if App.config.auto_sync ~= false and hasSync() and NetworkMgr:isConnected() then
         UIManager:nextTick(function() self:sync(function() end) end)
     end
 end
 
 function Plugin:onNetworkConnected()
-    if self.chapter and App.config.auto_sync ~= false and App.config.webdav_url then
+    if self.chapter and App.config.auto_sync ~= false and hasSync() then
         UIManager:nextTick(function() self:sync(function() end) end)
     end
 end

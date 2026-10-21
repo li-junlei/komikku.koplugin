@@ -4,6 +4,36 @@ local P = require("km_proto")
 local S = require("km_sync")
 local C = {}
 
+function C.isKomga(m)
+    for _, kind in ipairs({"series", "books", "readlists"}) do
+        if m.url:match("^https://.-/api/v1/" .. kind .. "/[%w_-]+$") then return true end
+    end
+    return false
+end
+
+function C.sourceBytes(id)
+    assert(type(id) == "string" and id:match("^%-?%d+$") and #id <= 20, "无效的来源 ID")
+    local ffi = require("ffi")
+    local n = ffi.new("uint64_t", 0)
+    for digit in id:gmatch("%d") do n = n * 10 + tonumber(digit) end
+    if id:sub(1, 1) == "-" then n = -n end
+    local out = {}
+    repeat
+        local b = tonumber(n % 128); n = n / 128
+        out[#out + 1] = string.char(b + (n > 0 and 128 or 0))
+    until n == 0
+    local raw = table.concat(out)
+    assert(C.sourceId(raw) == id, "来源 ID 超出范围或格式无效")
+    return raw
+end
+
+function C.defaultTemplate(config)
+    -- Official Komga factory's first instance; a synced phone source takes precedence.
+    local id = config.komga_source_id
+    return { source = C.sourceBytes(id and id ~= "" and id or "4508733312114627536"),
+        url = H.validateBase(config.komga_url) .. "/api/v1/series/" }
+end
+
 function C.path(filters, page, size)
     size = size or 6
     assert(type(size) == "number" and size >= 1 and size <= 50 and size == math.floor(size), "无效的分页数量")
@@ -71,7 +101,7 @@ end
 function C.template(config, shelf)
     if config.komga_source_id and config.komga_source_id ~= "" then
         for _, m in ipairs((shelf or {}).mangas or {}) do
-            if C.sourceId(m.source) == config.komga_source_id then return m end
+            if C.isKomga(m) and C.sourceId(m.source) == config.komga_source_id then return m end
         end
         return nil
     end
@@ -102,7 +132,7 @@ function C.sources(shelf)
         end
     end
     for _, m in ipairs(shelf.mangas) do
-        if m.url:find("/api/v1/", 1, true) and not seen[m.source] then
+        if C.isKomga(m) and not seen[m.source] then
             seen[m.source] = true
             result[#result + 1] = { name = (names[m.source] or "Komga") .. " · " .. m.title, manga = m }
         end

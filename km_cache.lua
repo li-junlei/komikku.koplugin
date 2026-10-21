@@ -11,6 +11,10 @@ function C.new(root, config)
 end
 
 function C:directory(address)
+    local seen = {}
+    while self.address_aliases and self.address_aliases[address] and not seen[address] do
+        seen[address] = true; address = self.address_aliases[address]
+    end
     local hash = require("ffi/sha2").md5((self.config.komga_url or "") .. "\0"
         .. (self.config.komga_user or "") .. "\0" .. address)
     return self.root .. "/" .. hash
@@ -21,7 +25,8 @@ function C:manifest(address)
     local bytes = F.read(dir .. "/chapter.kmk")
     if bytes then
         local ok, m = pcall(require("json").decode, bytes)
-        assert(ok and type(m) == "table" and m.address == address and type(m.pages) == "table"
+        assert(ok and type(m) == "table" and type(m.address) == "string"
+            and self:directory(m.address) == dir and type(m.pages) == "table"
             and #m.pages > 0, "本地章节清单损坏，请删除该章节下载后重试")
         return m, dir
     end

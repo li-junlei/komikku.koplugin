@@ -193,7 +193,7 @@ def install(Checks, backup, chapter, field):
             local files={}
             package.loaded.km_files={read=function(path) return files[path] end,write=function(path,bytes) files[path]=bytes end}
             local puts=0
-            package.loaded.km_http={webdavUrl=function() return 'https://dav/backup.proto' end,
+            package.loaded.km_http={validateBase=function(v) return v end,webdavUrl=function() return 'https://dav/backup.proto' end,
                 request=function(config,service,method,url,body,headers)
                     if method=='GET' then return remote_bytes,200,{etag='"etag"'} end
                     assert(headers['If-Match']=='"etag"')
@@ -202,7 +202,7 @@ def install(Checks, backup, chapter, field):
             local App=require('km_app')
             App.root='/data';App.config={komga_url='https://configured.example',komga_user='user'}
             App.state={pending={},positions={},local_progress={}};App.shelf=shelf
-            App.cache={hasPage=function() return true end}
+            App.cache={hasPage=function() return true end,stopPrefetch=function() end}
             function App:saveState() end
             App:remember(candidate)
             local m,c=App:find(candidate.key,candidate.chapters[1].key)
@@ -211,6 +211,8 @@ def install(Checks, backup, chapter, field):
             local k=require('km_sync').progressKey(m,c)
             assert(App.state.pending[k]==nil and App.state.local_progress[k].page==5)
             assert(App:addToShelf(m,1,function(fn) return fn() end))
+            assert(puts==0 and App:find(m.key).favorite)
+            App:sync(function(fn) return fn() end)
             m,c=App:find(m.key,c.key)
             assert(m.favorite and c.page==5 and c.version==4 and puts==1)
             assert(App.state.pending[k]==nil)
@@ -280,7 +282,7 @@ def install(Checks, backup, chapter, field):
             local negative=raw({255,255,255,255,255,255,255,255,255,1})
             assert(C.sourceId(high)=='9223372036854775807')
             assert(C.sourceId(negative)=='-1')
-            local m={source=high,title='Phone comic',url='/series/S1'}
+            local m={source=high,title='Phone comic',url='https://server/api/v1/series/S1'}
             local shelf={mangas={m}}
             local config={komga_source_id='9223372036854775807',komga_url='https://server'}
             assert(C.template(config,shelf)==m)
@@ -316,7 +318,7 @@ def install(Checks, backup, chapter, field):
             assert(App.config.komga_source_id==nil)
             input='123'
             dialog.buttons[1][2].callback()
-            assert(App.config.komga_source_id==nil)
+            assert(App.config.komga_source_id=='123')
             input=' 9223372036854775807 '
             dialog.buttons[1][2].callback()
             assert(App.config.komga_source_id=='9223372036854775807')

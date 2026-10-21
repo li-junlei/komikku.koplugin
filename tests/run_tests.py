@@ -463,7 +463,7 @@ class Checks(unittest.TestCase):
             plugin:shelf()
             assert(#menus[1].items==4)
             menus[1].items[4].callback()
-            assert(#menus[2].items==2)
+            assert(#menus[2].items==4)
             menus[2].items[2].callback()
             assert(#menus[3].items==3)
             function plugin:openChapter(m,c) events.open=c.url end
@@ -852,4 +852,6 @@ if __name__ == '__main__':
     install_pageload(Checks)
     from test_privacy import install as install_privacy
     install_privacy(Checks)
+    from test_standalone import install as install_standalone
+    install_standalone(Checks)
     unittest.main(verbosity=2)

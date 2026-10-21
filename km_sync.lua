@@ -25,7 +25,7 @@ local function chapter(fields)
     }
 end
 
-function S.decode(bytes)
+function S.decode(bytes, allow_empty)
     local result = { fields = P.parse(bytes), mangas = {}, categories = {} }
     for _, f in ipairs(result.fields) do
         if f.id == 1 then
@@ -56,7 +56,7 @@ function S.decode(bytes)
             }
         end
     end
-    assert(#result.mangas > 0, "同步文件没有漫画；请先在手机完整同步书架和章节")
+    assert(allow_empty or #result.mangas > 0, "同步文件没有漫画；请先在手机完整同步书架和章节")
     return result
 end
 
@@ -70,8 +70,8 @@ function S.progress(c, page, total, previous, now)
     return { page = page - 1, read = read, version = base.version + 1, modified = now or os.time() }
 end
 
-function S.merge(bytes, pending)
-    local backup, settled, changed = S.decode(bytes), {}, false
+function S.merge(bytes, pending, allow_empty)
+    local backup, settled, changed = S.decode(bytes, allow_empty), {}, false
     for _, m in ipairs(backup.mangas) do
         local mf, manga_changed = {}, false
         for _, f in ipairs(m.fields) do mf[#mf + 1] = f end
