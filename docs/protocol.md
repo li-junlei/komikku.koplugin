@@ -49,7 +49,7 @@ Komikku 源码的实际逻辑以 `version` 为准，部分注释写的是时间�
 
 ## 0.2.0 书库与新增收藏
 
-筛选对应 [KomgaFilters.kt](https://github.com/keiyoushi/extensions-source/blob/main/src/all/komga/src/eu/kanade/tachiyomi/extension/all/komga/KomgaFilters.kt) 以及 [Komga.kt](https://github.com/keiyoushi/extensions-source/blob/main/src/all/komga/src/eu/kanade/tachiyomi/extension/all/komga/Komga.kt) 的 `searchMangaUrl` / `fetchFilterData`，使用相同 API 路径、重复的 read_status/author 参数和逗号多选语义，额外将 size 固定为 6。参考的是扩展当前源码，不代表读取到了用户安装 APK 的版本或手机当前筛选状态。
+筛选对应 [KomgaFilters.kt](https://github.com/keiyoushi/extensions-source/blob/main/src/all/komga/src/eu/kanade/tachiyomi/extension/all/komga/KomgaFilters.kt) 以及 [Komga.kt](https://github.com/keiyoushi/extensions-source/blob/main/src/all/komga/src/eu/kanade/tachiyomi/extension/all/komga/Komga.kt) 的 `searchMangaUrl` / `fetchFilterData`，使用相同 API 路径、重复的 read_status/author 参数和逗号多选语义，封面模式 size 为 6，列表模式 size 为 50。参考的是扩展当前源码，不代表读取到了用户安装 APK 的版本或手机当前筛选状态。
 
 新增漫画的 source varint 直接沿用用户选择的手机来源；身份 URL 使用该来源已同步的原始 base，而 HTTP 请求仍发送到插件配置的地址。浮点章节号编码为 IEEE754 float32。章节命名、阅读列表前缀、章节倒序及过滤不可兼容 EPUB 的规则对应扩展；自定义名称模板和译者分隔符由设置入口配置。
 

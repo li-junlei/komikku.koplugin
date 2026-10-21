@@ -66,13 +66,16 @@ function L.show(state, page)
     request(state.worker, function() return C.browse(App.config, state.filters, page) end, function(result)
         state.result = result
         L.render(state)
-    end, "正在浏览 Komga 书库…（每页 6 本）")
+    end, "正在浏览 Komga 书库…")
 end
 
 function L.render(state, cached_only)
     local owner, result = state.owner, state.result
     local function view(mode)
-        App.config.library_view = mode; App:saveConfig(); L.render(state)
+        local first = (result.page - 1) * result.page_size
+        local size = mode == "covers" and 6 or 50
+        App.config.library_view = mode; App:saveConfig()
+        L.show(state, math.floor(first / size) + 1)
     end
     if App.config.library_view == "covers" then
         owner:coverShelf(result.items, nil, nil, cached_only, {

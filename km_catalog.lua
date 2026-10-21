@@ -4,14 +4,16 @@ local P = require("km_proto")
 local S = require("km_sync")
 local C = {}
 
-function C.path(filters, page)
+function C.path(filters, page, size)
+    size = size or 6
+    assert(type(size) == "number" and size >= 1 and size <= 50 and size == math.floor(size), "无效的分页数量")
     local kind = filters.kind or "series"
     assert(kind == "series" or kind == "books" or kind == "readlists", "无效的书库类型")
     local collection = filters.collection
     local path = collection and collection ~= "" and ("collections/" .. H.escape(collection) .. "/series") or kind
     local query = {}
     local function add(k, v) query[#query + 1] = H.escape(k) .. "=" .. H.escape(tostring(v)) end
-    add("search", filters.search or ""); add("page", (page or 1) - 1); add("size", 6); add("deleted", "false")
+    add("search", filters.search or ""); add("page", (page or 1) - 1); add("size", size); add("deleted", "false")
     if filters.unread then add("read_status", "UNREAD"); add("read_status", "IN_PROGRESS") end
     if filters.in_progress then add("read_status", "IN_PROGRESS") end
     if filters.read then add("read_status", "READ") end
@@ -28,11 +30,12 @@ function C.path(filters, page)
 end
 
 function C.browse(config, filters, page)
-    local path, kind = C.path(filters, page)
+    local size = config.library_view == "covers" and 6 or 50
+    local path, kind = C.path(filters, page, size)
     local result = K.json(config, path)
     assert(type(result.content) == "table" and type(result.totalPages) == "number"
         and result.totalPages >= 0 and result.totalPages == math.floor(result.totalPages), "Komga 分页响应无效")
-    assert(#result.content <= 6, "服务器没有遵守每页 6 本的请求")
+    assert(#result.content <= size, "服务器没有遵守请求的分页数量")
     local items = {}
     for _, item in ipairs(result.content) do
         assert(type(item.id) == "string" and item.id:match("^[%w_-]+$"), "无效的 Komga ID")
@@ -40,7 +43,7 @@ function C.browse(config, filters, page)
         items[#items + 1] = { title = (item.metadata and item.metadata.title) or item.name or "Komga",
             url = url, key = "catalog:" .. url, kind = kind, id = item.id, chapters = {}, categories = {} }
     end
-    return { items = items, page = page or 1, pages = math.max(1, result.totalPages) }
+    return { items = items, page = page or 1, pages = math.max(1, result.totalPages), page_size = size }
 end
 
 function C.options(config)

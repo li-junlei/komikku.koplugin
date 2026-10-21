@@ -131,7 +131,8 @@ def install(Checks, backup, chapter, field):
             local requests={}
             function C.browse(config,filters,page)
                 requests[#requests+1]=page
-                return {items={{title='Book',key='k',chapters={}}},page=page,pages=3}
+                return {items={{title='Book',key='k',chapters={}}},page=page,
+                    pages=config.library_view=='covers' and 25 or 3,page_size=config.library_view=='covers' and 6 or 50}
             end
             function C.options() return {libraries={{id='L',name='Library'}},collections={{id='C',name='Collection'}},
                 genres={'SF'},tags={'T'},publishers={'P'},authors={{name='W',role='writer'}}} end
@@ -152,9 +153,15 @@ def install(Checks, backup, chapter, field):
             L.open(owner,worker)
             assert(requests[1]==1 and #owner.items==5)
             owner.items[1].callback()
-            assert(App.config.library_view=='covers' and owner.context.pages==3)
+            assert(App.config.library_view=='covers' and owner.context.pages==25 and requests[#requests]==1)
             owner.context.on_page(2)
-            assert(requests[2]==2 and owner.context.page==2)
+            assert(requests[#requests]==2 and owner.context.page==2)
+            owner.context.on_list()
+            assert(App.config.library_view=='list' and requests[#requests]==1)
+            owner.items[#owner.items].callback()
+            assert(requests[#requests]==2)
+            owner.items[1].callback()
+            assert(App.config.library_view=='covers' and owner.context.page==9)
             owner.context.buttons[3].callback()
             assert(owner.title:find('Komga') and #owner.items>=16)
             local function click(text)
@@ -231,7 +238,7 @@ def install(Checks, backup, chapter, field):
             local C=require('km_catalog')
             local result=C.browse({komga_url='https://server/prefix'},{},2)
             assert(result.page==2 and result.pages==4 and result.items[1].url=='https://server/prefix/api/v1/series/S1')
-            assert(calls[1]:find('page=1') and calls[1]:find('size=6'))
+            assert(calls[1]:find('page=1') and calls[1]:find('size=50'))
             local facets=C.options({})
             assert(#calls==7 and facets.libraries[1].id=='L' and facets.authors[1].role=='writer')
             local buffer=require('string.buffer')
@@ -241,6 +248,27 @@ def install(Checks, backup, chapter, field):
             assert(C.template({komga_url='https://server/prefix'},{mangas={a,b}})==b)
             assert(C.template({komga_url='https://server/prefix'},{mangas={a}})==a)
             assert(C.template({komga_url='https://server/prefix'},nil)==nil)
+        ''')
+
+    def test_library_list_accepts_fifty_and_covers_keep_six(self):
+        self.lua.execute(b'''
+            local excess=false
+            package.loaded.km_komga={json=function(_,path)
+                local size=tonumber(path:match('[?&]size=(%d+)'))
+                local content={}
+                for i=1,size+(excess and 1 or 0) do content[i]={id='S'..i,name='Book '..i} end
+                return {content=content,totalPages=10}
+            end}
+            package.loaded['socket.url']={parse=function() return {scheme='https',host='server'} end}
+            local C=require('km_catalog')
+            local config={komga_url='https://server',library_view='list'}
+            local result=C.browse(config,{},2)
+            assert(#result.items==50 and result.page_size==50 and result.page==2)
+            config.library_view='covers'
+            result=C.browse(config,{},2)
+            assert(#result.items==6 and result.page_size==6)
+            excess=true
+            assert(not pcall(C.browse,config,{},1))
         ''')
 
     def test_manual_source_selection_preserves_full_int64(self):
